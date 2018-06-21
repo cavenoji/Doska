@@ -4,7 +4,7 @@ let express               = require('express');
 let router                = express.Router();
 let mongoose              = require('mongoose'); //mongo connection
 let bodyParser            = require('body-parser'); //parses information from POST
-let methodOverride        = require('method-override'); //used to manipulate POST
+//let methodOverride        = require('method-override'); //used to manipulate POST
 let promise               = require('bluebird');
 let fs                    = require('fs');
 let multer                = require('multer');
@@ -35,15 +35,6 @@ const phoneRegex = /^[\+]?[(]?[0-9]{3}[)]?[-\s\.]?[0-9]{3}[-\s\.]?[0-9]{4,6}$/;
 mongoose.Promise = promise;
 
 router.use(bodyParser.urlencoded({ extended: true }));
-
-router.use(methodOverride(function(req, res){
-    if (req.body && typeof req.body === 'object' && '_method' in req.body) {
-        // look in urlencoded POST bodies and delete it
-        let method = req.body._method;
-        delete req.body._method;
-        return method;
-    }
-}));
 
 //fields checking
 const requiredFields = (file, phoneNumber, description, adName, price, userId) => {
