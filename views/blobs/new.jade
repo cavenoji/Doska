@@ -1,0 +1,14 @@
+extends ../layout
+
+block content
+    h1.
+        #{title}
+    form#formAddBlob(name="addblob",method="post",action="/api/v1/blobs")
+        p Number: 
+            input#inputName(type="phoneNumber", placeholder="ex. 380995595095", name="phoneNumber")
+        p Description:
+            input#inputBadge(type="description", placeholder="ex. some description", name="description")
+        p Date: 
+            input#inputDob(type="date", name="date")
+        p
+            button#btnSubmit(type="submit") submit

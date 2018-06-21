@@ -1,0 +1,19 @@
+extends ../layout
+
+block content
+    h1.
+         #{title}
+    ul
+        - each blob, i in blobs
+            li
+                = blob.phoneNumber
+                = blob.description
+                = blob.date
+                form(action='/api/v1/blobs/#{blob._id}/edit',method='post',enctype='application/x-www-form-urlencoded')
+                    input(type='hidden',value='DELETE',name='_method')
+                    button(type='submit').
+                        Delete
+                p 
+                    a(href='/api/v1/blobs/#{blob._id}/edit') Edit
+                p
+                    a(href='/api/v1/blobs/#{blob._id}') Show
