@@ -13,7 +13,7 @@ let imageminPngquant      = require('imagemin-pngquant');
 let Blob                  = require('../model/blob');
 let validateJwt           = require('express-jwt');
 let User                  = require('../model/user');
-//let sharp                 = require('sharp');
+let sharp                 = require('sharp');
 
 const validateUser		  = require('../libs/validateuser');
 const getAds              = require('../libs/getblobs');              
@@ -123,11 +123,6 @@ router.use(validateJwt({secret: "secret"}));
 //create a new blob
 router.put('/', upload.single('file'), function(req, res) {
 
-        console.log(upload);
-
-        console.log("Body" + req.body);
-        console.log("User" + req.user);
-
         if(!requiredFieldsValidator(req.body.number, req.body.description, req.body.ad_name, 
             req.body.price, req.user.userId) || !categoryValidator(req.body.category)) {
             res.status(400).send({error: "400"});
@@ -141,24 +136,25 @@ router.put('/', upload.single('file'), function(req, res) {
 		}
         
         let largePhotoName = __dirname + "/../pics/" + req.file.filename;
-        let compressedPhotosDirectory = largePhotoName.substring(0, largePhotoName.lastIndexOf('/')) + "/compressed/";
-        let downscaledPhotNamesDirectory = largePhotoName.substring(0, largePhotoName.lastIndexOf('/')) 
-            + "/downScaled" + largePhotoName;
+        let normalPhotosDir = largePhotoName.substring(0, largePhotoName.lastIndexOf('/')) + "/compressed/";
+        let thumbnailPhotoName = largePhotoName.substring(0, largePhotoName.lastIndexOf('/')) + "/downscaled/"
+            + req.file.filename;
 
-        /*imagemin([largePhotoName], compressedPhotosDirectory, {
+        imagemin([largePhotoName], normalPhotosDir, {
             plugins: [
                 imageminJpegtran(),
                 imageminPngquant({quality: '65-80'})
             ]
-        });*/
+        });
 
-        /*sharp(largePhotoName)
+        sharp(largePhotoName)
             .resize(300)
-            .toFile(downscaledPhotosDirectory, function(err) {
-                downscaledPhotosDirectory = "";
-            });*/
+            .toFile(thumbnailPhotoName, function(err) {
+                console.log(err);
+                if(err) thumbnailPhotoName = "";
+            });
     
-        console.log(compressedPhotosDirectory + req.file.filename);
+        console.log(thumbnailPhotoName);
 
         Blob.create({
             price: req.body.price,
@@ -166,8 +162,8 @@ router.put('/', upload.single('file'), function(req, res) {
             description: req.body.description,
             photo: {
                 large: largePhotoName,
-                normal: compressedPhotosDirectory + req.file.filename,
-                thumbnail: downscaledPhotoName   
+                normal: normalPhotosDir + req.file.filename,
+                thumbnail: thumbnailPhotoName  
             },
             date: req.body.date,
             userId: req.user.userId,
@@ -299,16 +295,25 @@ router.post('/:id/edit', upload.single('file'), function(req, res) {
             return;
         }
 
-        let photoName = null;
+        let largePhotoName = null;
+        let normalPhotoDir = null;
+        let thumbnailPhotoName = null;
 
-        if(req.file) photoName = __dirname + "/../pics/" + req.file.filename;
+        if(req.file) {
+            largePhotoName = __dirname + "/../pics/" + req.file.filename;
+            normalPhotoDir = largePhotoName.substring(0, largePhotoName.lastIndexOf('/')) + "/compressed/";
+            thumbnailPhotoName = largePhotoName.substring(0, largePhotoName.lastIndexOf('/')) + "/downscaled/" + req.file.filename;
+        }
 
-        let oldFileName = blob.photoFile;
+        let normalPhotoName = normalPhotoDir + req.file.filename;
+        let oldFileName = blob.photo.large;
 
         blob.price = req.body.price || blob.price;
         blob.adName =  req.body.ad_name || blob.adName;
         blob.description = req.body.description || blob.description;
-        blob.photoFile = photoName || blob.photoFile;
+        blob.photo.normal = normalPhotoName.startsWith(null) ? blob.photo.normal : normalPhotoName;
+        blob.photo.large = largePhotoName || blob.photo.large;
+        blob.photo.thumbnail = thumbnailPhotoName || blob.photo.thumbnail;
         blob.date = req.body.date || Date.now();
         blob.category = req.body.category || blob.category;
 
@@ -316,26 +321,36 @@ router.post('/:id/edit', upload.single('file'), function(req, res) {
         blob.save(function (err, updatedBlob) {
             if (err) {
                 res.status(500).json({error: err});
+                return;
             }
-            else {
-                if(blob.photoFile !== updatedBlob.photoFile){
-                    imagemin([photoName], photoName.substring(0, photoName.lastIndexOf('/')), {
-                        plugins: [
-                            imageminJpegtran(),
-                            imageminPngquant({quality: '65-80'})
-                        ]
-                    });
-                }
-                res.format({
-                    html: function(){
-                        res.redirect("/api/v1/blobs/" + blob._id);
-                    },
-                    //JSON responds showing the updated values
-                    json: function(){
-                        res.status(200).json({message: "Post edited successfully!"});
+            console.log(updatedBlob.photo.large);
+            console.log(blob.photo.large);
+            if(oldFileName !== updatedBlob.photo.large) {
+                imagemin([largePhotoName], normalPhotoDir, {
+                    plugins: [
+                        imageminJpegtran(),
+                        imageminPngquant({quality: '65-80'})
+                    ]
+                });
+
+                sharp(largePhotoName)
+                .resize(300)
+                .toFile(thumbnailPhotoName, function(err) {
+                    if(err) {
+                        console.error(err);
+                        thumbnailPhotoName = "";
                     }
                 });
             }
+            res.format({
+                html: function(){
+                    res.redirect("/api/v1/blobs/" + blob._id);
+                },
+                //JSON responds showing the updated values
+                json: function(){
+                    res.status(200).json({message: "Post edited successfully!"});
+                }
+            });
         }).catch(error => {
             console.error(error);
             new Error(error)
@@ -364,21 +379,20 @@ router.delete('/:id/delete', function (req, res){
                 return new Error("An error ocurred");
             }      
             //Returning success messages saying it was deleted
-            fs.unlink(blob.photoFile, (err) => {
-                if (err) throw err;
-                console.log('deleted ' + blob.photoFile);
-                console.log('DELETE removing ID: ' + blob._id);
-                res.format({
-                    //HTML returns us back to the main page, or you can create a success page
-                    html: function(){
-                        res.redirect("/api/v1/blobs");
-                    },
+            //fs.unlink(blob.photoFile, (err) => {
+                //if (err) console.error(err);
+            console.log('deleted ' + blob.photoFile);
+            console.log('DELETE removing ID: ' + blob._id);
+            res.format({
+                //HTML returns us back to the main page, or you can create a success page
+                html: function(){
+                    res.redirect("/api/v1/blobs");
+                },
                     //JSON returns the item with the message that is has been deleted
-                    json: function(){
-                        res.status(200).json({message: "Post successfully deleted"});
-                    }
-                    });
-                });
+                json: function(){
+                    res.status(200).json({message: "Post successfully deleted"});
+                }
+            });
         });
     }).catch(new Error("An error ocurred!"));
 });
