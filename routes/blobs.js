@@ -4,7 +4,6 @@ let express               = require('express');
 let router                = express.Router();
 let mongoose              = require('mongoose'); //mongo connection
 let bodyParser            = require('body-parser'); //parses information from POST
-//let methodOverride        = require('method-override'); //used to manipulate POST
 let promise               = require('bluebird');
 let fs                    = require('fs');
 let multer                = require('multer');
@@ -17,22 +16,31 @@ let User                  = require('../model/user');
 
 const validateUser		  = require('../libs/validateuser');
 const getImage            = require('../libs/getimage');
-const getReqResponse      = require('../libs/getblobs');
+const getAds              = require('../libs/getblobs');
 
-let storage = multer.diskStorage({
-    destination: function (req, file, cb) {
-        cb(null, __dirname + '/../pics')
-    },
-    filename: function (req, file, cb) {
-        cb(null, new Date().getTime().toString() + file.originalname)
-  	}
-});
-
-let upload = multer({ storage: storage , limits: {fileSize : '50mb'}});
+mongoose.Promise = promise;     
 
 const phoneRegex = /^[\+]?[(]?[0-9]{3}[)]?[-\s\.]?[0-9]{3}[-\s\.]?[0-9]{4,6}$/;
 
-mongoose.Promise = promise;
+let storage = multer.diskStorage({
+    destination: function (req, file, cb) {
+        cb(null, __dirname + '/../pics');
+    },
+    filename: function (req, file, cb) {
+        cb(null, [new Date().getTime().toString(), ".", file.mimetype.split("/")[1]].join(''));
+  	}
+});
+
+let upload = multer({ 
+    fileFilter: function(req, file, cb) {
+        if(!file.mimetype.startsWith("image")){
+            return cb(new Error("Only images are allowed"));
+        }
+        cb(null, true);
+    }, 
+    storage: storage, 
+    limits: { fileSize : '50mb'}
+});
 
 router.use(bodyParser.urlencoded({ extended: true }));
 
@@ -42,131 +50,132 @@ const requiredFields = (file, phoneNumber, description, adName, price, userId) =
     return false;
 }
 
-//base64 header checking
-const isBase64Header = (base64Str) =>{
-    if(base64Str.indexOf("data:image/png;base64,") === -1)
-        return false;
-    return true;
-}
-
+//SEARCH
 router.route('/search')
     .get(function(req, res){
+        
         let query = "";
+        
         for(const key in req.query){
             if(key == "num") break;
             query += req.query[key];
         }
+        
         console.log(`request query ${JSON.stringify(query)}`);
+        
         let num = parseInt(req.query.num);
-        if(!!req.query.num === false) num = 5;
+        if(!!req.query.num === false) {
+            num = 5;
+        }
         console.log(`number of posts ${num}`);
+        
         Blob.find({$text: {$search: query}})
             .limit(num)
             .sort([['date', '-1']])
             .exec(function (err, blobs){
-                if(err) res.status(500).json({err: "An error occured!"});
-                getReqResponse(res, blobs);
+                if(err) {
+                    res.status(500).json({error: err});
+                }
+                getAds(res, blobs);
         }).catch(console.error);
     });
 
 //GET all blobs
+//TODO add paging
 router.get('/', function(req, res, next) {
-    //retrieve all blobs from Mongo
-    Blob.find({}).sort([['date', '-1']]).exec(function (err, blobs) {
-        if (err) {
-            return console.error(err);
-        } 
-        else {
-            //respond to both HTML and JSON. JSON responses require 'Accept: application/json;' in the Request Header
-            res.format({
-                //HTML response will render the index.jade file in the views/blobs folder. We are also setting "blobs" to be an accessible variable in our jade view
-                html: () => {
-                    res.render('blobs/index', {
-                        title: 'All my Blobs',
-                        "blobs" : blobs
-                    });
-                },
-                //JSON response will show all blobs in JSON format
-                json: () => {
-                	getReqResponse(res, blobs);
-                }
-            });
-        }     
+    console.log(req.query);
+
+    //skip: req.query.page * req.query.page_size, limit: req.query.page_size
+    Blob.find({})
+        .limit(+req.query.page_size)
+        .skip(req.query.page * req.query.page_size)
+        .sort([['date', '-1']])
+        .exec(function (err, blobs) {
+            if (err) {
+                return console.error(err);
+            } 
+            else {
+                //respond to both HTML and JSON. JSON responses require 'Accept: application/json;' in the Request Header
+                res.format({
+                    //HTML response will render the index.jade file in the views/blobs folder. We are also setting "blobs" to be an accessible variable in our jade view
+                    html: () => {
+                        res.render('blobs/index', {
+                            title: 'All my Blobs',
+                            "blobs" : blobs
+                        });
+                    },
+                    //JSON response will show all blobs in JSON format
+                    json: () => {
+                        res.status(200).json(getAds(blobs));
+                    }
+                });
+            }     
     }).catch(console.error);
 });
 
+//GET Blobs by category
 router.use(validateJwt({secret: "secret"}));
 
+//TODO change post to put
 //POST a new blob
 router.post('/', upload.single('file'), function(req, res) {
-    	//app.use(upload);
-        //Get values from POST request. These can be done through forms or REST calls. These rely on the "name" attributes for forms
-        //call the create function for our database
 
-        //optimizing images via imagemin
+        console.log(req.file);
 
-        //file, phoneNumber, description, adName, price
-        if(!requiredFields(req.body.file, req.body.number, req.body.description, req.body.ad_name, req.body.price, req.user.userId)) {
-            res.status(500).send({error: "incomplete number of fields"});
+        if(!requiredFields(req.file, req.body.number, req.body.description, req.body.ad_name, req.body.price, req.user.userId)) {
+            res.status(400).send({error: "incomplete number of fields or incorrect file mime type"});
             return;
         }
         else {
             let regEx = new RegExp(phoneRegex);
 
-            if(!regEx.test(req.body.number) || !isBase64Header(req.body.file)){
-                res.status(500).send({error: "incorrect file or phone number"});
+            if(!regEx.test(req.body.number)){
+                res.status(500).send({error: "incorrect phone number"});
                 return;
             }
 
-            let base64Data = req.body.file.replace("data:image/png;base64,", "");
-            let photoName = __dirname + "/../pics/" + new Date().getTime().toString() + ".png";
+            //let base64Data = req.body.file.replace("data:image/png;base64,", "");
+            let photoName = __dirname + "/../pics/" + req.file.filename;
 
-            fs.writeFile(photoName, base64Data, 'base64', (err) => {
-                if(err) {
-                    res.status(500).send({error: "Error!"});
-                    return;
-                }
-
-                imagemin([photoName], photoName.substring(0, photoName.lastIndexOf('/')), {
-                    plugins: [
-                        imageminJpegtran(),
-                        imageminPngquant({quality: '65-80'})
-                    ]
-                });
-    
-                Blob.create({
-                    price: req.body.price,
-                    adName: req.body.ad_name,
-                    phoneNumber : req.body.number,
-                    description : req.body.description,
-                    photoFile: photoName,
-                    date : req.body.date,
-                    userId : req.user.userId
-                }, function (err, blob) {
-                    if (err) {
-                        res.status(500).send({error: "There was a problem adding the information to the database."});
-                    } 
-                    else {
-                          //Blob has been created
-                        console.log('POST creating new blob: ' + blob);
-                        res.format({
-                              //HTML response will set the location and redirect back to the home page. You could also create a 'success' page if that's your thing
-                            html: function(){
-                                // If it worked, set the header so the address bar doesn't still say /adduser
-                                res.location("blobs");
-                                // And forward to success page
-                                res.redirect("/api/v1/blobs");
-                            },
-                            //JSON response will show the newly created blob
-                            json: function(){
-                                res.status(201).send({
-                                    id: blob._id
-                                });
-                            }
-                        });
-                    }
-                }).catch(console.error);
+            imagemin([photoName], photoName.substring(0, photoName.lastIndexOf('/')), {
+                plugins: [
+                    imageminJpegtran(),
+                    imageminPngquant({quality: '65-80'})
+                ]
             });
+    
+            Blob.create({
+                price: req.body.price,
+                adName: req.body.ad_name,
+                phoneNumber : req.body.number,
+                description : req.body.description,
+                photoFile: photoName,
+                date : req.body.date,
+                userId : req.user.userId
+            }, function (err, blob) {
+                if (err) {
+                    res.status(500).send({error: "There was a problem adding the information to the database."});
+                } 
+                else {
+                    //Blob has been created
+                    console.log('POST creating new blob: ' + blob);
+                    res.format({
+                        //HTML response will set the location and redirect back to the home page. You could also create a 'success' page if that's your thing
+                        html: function(){
+                            // If it worked, set the header so the address bar doesn't still say /adduser
+                            res.location("blobs");
+                            // And forward to success page
+                            res.redirect("/api/v1/blobs");
+                        },
+                        //JSON response will show the newly created blob
+                        json: function(){
+                            res.status(201).send({
+                                id: blob._id
+                            });
+                        }
+                    });
+                }
+            }).catch(console.error);
         }
 });
 
@@ -191,7 +200,7 @@ router.param('id', function(req, res, next, id) {
                     next(err);
                 },
                 json: function(){
-                    res.status(err.status).json({message : ' ' + err});
+                    res.status(err.status).json({error: err});
                 }
             });
         //if it is found we continue on
@@ -209,9 +218,13 @@ router.param('id', function(req, res, next, id) {
 
 router.get('/:id/photo', function (req, res){
 	Blob.findById(req.id, function (err, blob){
-		if (err) res.status(403).json({error: err});
-		else res.status(200).download(blob.photoFile);
-	}).catch(console.error);
+        if (err) {
+            res.status(403).json({error: err});
+        }
+		else {
+            res.status(200).download(blob.photoFile);
+        }
+	}).catch(err => new Error(err));
 });
 
 router.route('/:id')
@@ -232,16 +245,17 @@ router.route('/:id')
                         });
                     },
                     json: function(){
-                        getImage(blob.photoFile).then(data => {
-                            blob.photoFile = "data:image/png;base64," + data.toString('base64');
-                            res.status(200).json(blob);
-                        });
+                        blob.photoFile = "/static/photos/" + blob.photoFile.split("/").pop();
+                        //blob.photoFile = "data:image/png;base64," + data.toString('base64');
+                        res.status(200).json(blob);
                     }
                 });
      	    }
         }).catch(console.error);
 });
 
+
+//TODO: change put to post
 //PUT to update a blob by ID
 router.put('/:id/edit', function(req, res) {
     
@@ -289,7 +303,7 @@ router.put('/:id/edit', function(req, res) {
         blob.photoFile = photoName || blob.photoFile,
         blob.date = req.body.date || Date.now();
 
-            //update it
+        //update it
         blob.save(function (err, updatedBlob) {
             if (err) {
                 res.status(500).json({ err:"There was a problem updating the information to the database: " + err });
@@ -312,8 +326,7 @@ router.put('/:id/edit', function(req, res) {
                     }
                 });
             }
-        })
-        .catch(console.error);
+        }).catch(console.error);
     }).catch(console.error);
 });
 

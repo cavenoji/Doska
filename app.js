@@ -59,9 +59,22 @@ app.use(function(err, req, res, next) {
   	res.locals.message = err.message;
   	res.locals.error = req.app.get('env') === 'development' ? err : {};
 
-  // render the error page
+  	// render the error page
+	console.log(err.status);
   	res.status(err.status || 500);
-  	res.render('error');
+	//res.render('error');
+	res.format({
+		//HTML response will set the location and redirect back to the home page. You could also create a 'success' page if that's your thing
+	  	html: function(){
+			res.render('error');
+	 	 },
+	  	//JSON response will show the newly created blob
+	  	json: function(){
+		  	res.send({
+			  	error: err
+		  	});
+	  	}
+  	});
 });
 
 module.exports = app;
