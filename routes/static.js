@@ -3,7 +3,6 @@
 let express = require('express');
 let router = express.Router();
 let fs = require('fs');
-const getImage = require('../libs/getimage');
 const filesPath = '/home/cavenoj/doska-v2-auth/pics/';
 
 router

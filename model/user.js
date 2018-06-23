@@ -11,7 +11,7 @@ let User = mongoose.model('User', new mongoose.Schema({
         unique: true,
         required: true
     },
-    password: String
+    password: String,
   })
 );
 

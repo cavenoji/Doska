@@ -22,6 +22,8 @@ const jwt 				  = require('jsonwebtoken');
 const secret 			  = "secret";
 const bcrypt              = require('bcrypt-nodejs');
 
+const phoneRegex 		  = /^[\+]?[(]?[0-9]{3}[)]?[-\s\.]?[0-9]{3}[-\s\.]?[0-9]{4,6}$/;
+
 router.use(methodOverride(function(req, res){
     if (req.body && typeof req.body === 'object' && '_method' in req.body) {
         // look in urlencoded POST bodies and delete it
@@ -43,12 +45,14 @@ function registerUser(req, res, next){
 		res.status(422).json({error: "Incorrect data for registration"});
 	}	  
   	bcrypt.hash(req.body.password, null, null, function(err, hash) {
-		if (err) return;
+		if (err) {
+			return;
+		}
 		
 		let user = new User({
 			name: req.body.name,
 			email: req.body.email,
-			password: hash
+			password: hash,
 		});
 		
 		user.save(function (err) {
@@ -67,6 +71,7 @@ function registerUser(req, res, next){
 
 function loginUser(req, res, next){
 	User.findOne({email: req.body.email}, function(err, user){
+
 	  	if(err || !user){
 			res.status(422).json({err : "Wrong email or password"});
 			return;

@@ -1,4 +1,4 @@
 'use strict'
 
 let mongoose = require('mongoose');
-mongoose.connect('mongodb://localhost/boardv5', {useMongoClient: true});
+mongoose.connect('mongodb://localhost/board_auth', {useMongoClient: true});

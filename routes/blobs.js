@@ -13,10 +13,12 @@ let imageminPngquant      = require('imagemin-pngquant');
 let Blob                  = require('../model/blob');
 let validateJwt           = require('express-jwt');
 let User                  = require('../model/user');
+//let sharp                 = require('sharp');
 
 const validateUser		  = require('../libs/validateuser');
-const getImage            = require('../libs/getimage');
-const getAds              = require('../libs/getblobs');
+const getAds              = require('../libs/getblobs');              
+
+const categories          = require('../config/categories.json');
 
 mongoose.Promise = promise;     
 
@@ -45,10 +47,12 @@ let upload = multer({
 router.use(bodyParser.urlencoded({ extended: true }));
 
 //fields checking
-const requiredFields = (file, phoneNumber, description, adName, price, userId) => {
+const requiredFieldsValidator = (file, phoneNumber, description, adName, price, userId) => {
     if(Array.prototype.every.call(arguments, x => !!x )) return true;
     return false;
 }
+
+const categoryValidator = (category) => categories.includes(category);
 
 //SEARCH
 router.route('/search')
@@ -81,7 +85,6 @@ router.route('/search')
     });
 
 //GET all blobs
-//TODO add paging
 router.get('/', function(req, res, next) {
     console.log(req.query);
 
@@ -110,73 +113,95 @@ router.get('/', function(req, res, next) {
                     }
                 });
             }     
-    }).catch(console.error);
+    }).catch(error => new Error(error));
 });
 
 //GET Blobs by category
 router.use(validateJwt({secret: "secret"}));
 
 //TODO change post to put
-//POST a new blob
-router.post('/', upload.single('file'), function(req, res) {
+//create a new blob
+router.put('/', upload.single('file'), function(req, res) {
 
-        console.log(req.file);
+        console.log(upload);
 
-        if(!requiredFields(req.file, req.body.number, req.body.description, req.body.ad_name, req.body.price, req.user.userId)) {
-            res.status(400).send({error: "incomplete number of fields or incorrect file mime type"});
+        console.log("Body" + req.body);
+        console.log("User" + req.user);
+
+        if(!requiredFieldsValidator(req.body.number, req.body.description, req.body.ad_name, 
+            req.body.price, req.user.userId) || !categoryValidator(req.body.category)) {
+            res.status(400).send({error: "400"});
             return;
         }
-        else {
-            let regEx = new RegExp(phoneRegex);
+        
+        let regEx = new RegExp(phoneRegex);
+		if(!regEx.test(req.body.number)){
+			res.status(500).send({error: "incorrect phone number"});
+			return;
+		}
+        
+        let largePhotoName = __dirname + "/../pics/" + req.file.filename;
+        let compressedPhotosDirectory = largePhotoName.substring(0, largePhotoName.lastIndexOf('/')) + "/compressed/";
+        let downscaledPhotNamesDirectory = largePhotoName.substring(0, largePhotoName.lastIndexOf('/')) 
+            + "/downScaled" + largePhotoName;
 
-            if(!regEx.test(req.body.number)){
-                res.status(500).send({error: "incorrect phone number"});
-                return;
-            }
+        /*imagemin([largePhotoName], compressedPhotosDirectory, {
+            plugins: [
+                imageminJpegtran(),
+                imageminPngquant({quality: '65-80'})
+            ]
+        });*/
 
-            //let base64Data = req.body.file.replace("data:image/png;base64,", "");
-            let photoName = __dirname + "/../pics/" + req.file.filename;
-
-            imagemin([photoName], photoName.substring(0, photoName.lastIndexOf('/')), {
-                plugins: [
-                    imageminJpegtran(),
-                    imageminPngquant({quality: '65-80'})
-                ]
-            });
+        /*sharp(largePhotoName)
+            .resize(300)
+            .toFile(downscaledPhotosDirectory, function(err) {
+                downscaledPhotosDirectory = "";
+            });*/
     
-            Blob.create({
-                price: req.body.price,
-                adName: req.body.ad_name,
-                phoneNumber : req.body.number,
-                description : req.body.description,
-                photoFile: photoName,
-                date : req.body.date,
-                userId : req.user.userId
-            }, function (err, blob) {
-                if (err) {
-                    res.status(500).send({error: "There was a problem adding the information to the database."});
-                } 
-                else {
-                    //Blob has been created
-                    console.log('POST creating new blob: ' + blob);
-                    res.format({
-                        //HTML response will set the location and redirect back to the home page. You could also create a 'success' page if that's your thing
-                        html: function(){
-                            // If it worked, set the header so the address bar doesn't still say /adduser
-                            res.location("blobs");
-                            // And forward to success page
-                            res.redirect("/api/v1/blobs");
-                        },
+        console.log(compressedPhotosDirectory + req.file.filename);
+
+        Blob.create({
+            price: req.body.price,
+            adName: req.body.ad_name,
+            description: req.body.description,
+            photo: {
+                large: largePhotoName,
+                normal: compressedPhotosDirectory + req.file.filename,
+                thumbnail: downscaledPhotoName   
+            },
+            date: req.body.date,
+            userId: req.user.userId,
+            category: req.body.category,
+            phoneNumber: req.body.number
+        }, function (err, blob) {
+            console.error(blob);
+            if (err) {
+                console.log("Err" + err);
+                console.log("Blob" + blob);
+                res.status(500).send({error: "There was a problem adding the information to the database."});
+                return;
+            } 
+                //Blob has been created
+            console.log('PUT creating new blob: ' + blob);
+            res.format({
+                //HTML response will set the location and redirect back to the home page. You could also create a 'success' page if that's your thing
+                html: function(){
+                    // If it worked, set the header so the address bar doesn't still say /adduser
+                    res.location("blobs");
+                    // And forward to success page
+                    res.redirect("/api/v1/blobs");
+                },
                         //JSON response will show the newly created blob
-                        json: function(){
-                            res.status(201).send({
-                                id: blob._id
-                            });
-                        }
+                json: function(){
+                    res.status(201).send({
+                        id: blob._id
                     });
                 }
-            }).catch(console.error);
-        }
+            });
+        }).catch(error => {
+            //new Error("an error ocurred!");
+            console.log("Error" + error);
+        });
 });
 
 /* GET New Blob page. */
@@ -184,7 +209,7 @@ router.get('/new', function(req, res) {
     res.render('blobs/new', { title: 'Add New Blob' });
 });
 
-// route middleware to validate :id
+//route middleware to validate :id
 router.param('id', function(req, res, next, id) {
     //console.log('validating ' + id + ' exists');
     //find the ID in the Database
@@ -246,88 +271,79 @@ router.route('/:id')
                     },
                     json: function(){
                         blob.photoFile = "/static/photos/" + blob.photoFile.split("/").pop();
-                        //blob.photoFile = "data:image/png;base64," + data.toString('base64');
                         res.status(200).json(blob);
                     }
                 });
      	    }
-        }).catch(console.error);
+        }).catch(error => new Error(error));
 });
 
 
 //TODO: change put to post
-//PUT to update a blob by ID
-router.put('/:id/edit', function(req, res) {
+//update a blob by ID
+router.post('/:id/edit', upload.single('file'), function(req, res) {
     
-    if(Object.getOwnPropertyNames(req.body).length === 0){
+    if(Object.getOwnPropertyNames(req.body).length === 0 || !!!req.file){
         res.status(304).send({message: "Nothing to modify"});
         return;
     }
 
     Blob.findById(req.id, function (err, blob) {
 
-        if(err || req.user.userId !== blob.userId){
+        console.error(err);
+
+        console.log(req.user.userId + " " + blob.userId);
+
+        if(!!err || req.user.userId != blob.userId){
             res.status(403).json({error: "Incorrect token"});
             return;
         }
 
-        let photoName;
-        
-        if(!!req.body.file) {
-            if(!isBase64Header(req.body.file)){
-                res.status(403).json({error: "Incorrect photo"});
-            }
-            let base64Data = req.body.file.replace("data:image/png;base64,", "");
-            photoName = __dirname + "/../pics/" + new Date().getTime().toString() + ".png";
-            console.log(`new ${photoName}`);
-            fs.writeFile(photoName, base64Data, 'base64', (err) => {
-                if(err) {
-                    res.status(500).send({error: "Error!"});
-                    return;
-                }
-                imagemin([photoName], photoName.substring(0, photoName.lastIndexOf('/')), {
-                    plugins: [
-                        imageminJpegtran(),
-                        imageminPngquant({quality: '65-80'})
-                    ]
-                });
-            });
-        }
+        let photoName = null;
+
+        if(req.file) photoName = __dirname + "/../pics/" + req.file.filename;
 
         let oldFileName = blob.photoFile;
 
-        blob.price = req.body.price || blob.price,
-        blob.adName =  req.body.ad_name || blob.adName,
-        blob.phoneNumber = req.body.number || blob.phoneNumber,
-        blob.description = req.body.description || blob.description,
-        blob.photoFile = photoName || blob.photoFile,
+        blob.price = req.body.price || blob.price;
+        blob.adName =  req.body.ad_name || blob.adName;
+        blob.description = req.body.description || blob.description;
+        blob.photoFile = photoName || blob.photoFile;
         blob.date = req.body.date || Date.now();
+        blob.category = req.body.category || blob.category;
 
         //update it
         blob.save(function (err, updatedBlob) {
             if (err) {
-                res.status(500).json({ err:"There was a problem updating the information to the database: " + err });
+                res.status(500).json({error: err});
             }
             else {
-                if(req.body.file) {
-                    let base64Data = req.body.file.replace("data:image/png;base64,", "");
-                    fs.unlink(oldFileName, function(err){
-                        if(err) throw err;
+                if(blob.photoFile !== updatedBlob.photoFile){
+                    imagemin([photoName], photoName.substring(0, photoName.lastIndexOf('/')), {
+                        plugins: [
+                            imageminJpegtran(),
+                            imageminPngquant({quality: '65-80'})
+                        ]
                     });
                 }
-                    //HTML responds by going back to the page or you can be fancy and create a new view that shows a success page.
                 res.format({
                     html: function(){
                         res.redirect("/api/v1/blobs/" + blob._id);
                     },
-                            //JSON responds showing the updated values
+                    //JSON responds showing the updated values
                     json: function(){
                         res.status(200).json({message: "Post edited successfully!"});
                     }
                 });
             }
-        }).catch(console.error);
-    }).catch(console.error);
+        }).catch(error => {
+            console.error(error);
+            new Error(error)
+        });
+    }).catch(error => {
+        console.error(error);
+        new Error(error)
+    });
 });
 
 
@@ -335,37 +351,36 @@ router.put('/:id/edit', function(req, res) {
 router.delete('/:id/delete', function (req, res){
     //find blob by ID
     Blob.findById(req.id, function (err, blob) {
-        if (err || req.user.userId !== blob.userId) {
+        if (err) {
+            return new Error("An error ocurred!");
+        }
+        else if(req.user.userId !== blob.userId) {
             res.status(403).json({error: "Incorrect token"});
             return;
         } 
-        else {
-            //remove it from Mongo
-            blob.remove(function (err, blob) {
-                if (err) {
-                    return console.error(err);
-                } 
-                else {
-                    //Returning success messages saying it was deleted
-                    fs.unlink(blob.photoFile, (err) => {
-                        if (err) throw err;
-                        console.log('deleted ' + blob.photoFile);
-                        console.log('DELETE removing ID: ' + blob._id);
-                        res.format({
-                            //HTML returns us back to the main page, or you can create a success page
-                            html: function(){
-                               res.redirect("/api/v1/blobs");
-                            },
-                            //JSON returns the item with the message that is has been deleted
-                            json: function(){
-                                res.status(200).json({message: "Post successfully deleted"});
-                            }
-                        });
+        //remove it from Mongo
+        blob.remove(function (err, blob) {
+            if (err) {
+                return new Error("An error ocurred");
+            }      
+            //Returning success messages saying it was deleted
+            fs.unlink(blob.photoFile, (err) => {
+                if (err) throw err;
+                console.log('deleted ' + blob.photoFile);
+                console.log('DELETE removing ID: ' + blob._id);
+                res.format({
+                    //HTML returns us back to the main page, or you can create a success page
+                    html: function(){
+                        res.redirect("/api/v1/blobs");
+                    },
+                    //JSON returns the item with the message that is has been deleted
+                    json: function(){
+                        res.status(200).json({message: "Post successfully deleted"});
+                    }
                     });
-                }
-            });
-        }
-    }).catch(console.error);
+                });
+        });
+    }).catch(new Error("An error ocurred!"));
 });
 
 module.exports = router;
