@@ -10,7 +10,7 @@ router
         console.log(__dirname);
         fs.stat(filesPath + name, (err, stats) => {
             if (err) {
-                console.err(`Photo ${name} was not found`);
+                console.error(`Photo ${name} was not found`);
                 res.status(404)
                 let err = new Error('Not Found');
                 err.status = 404;
