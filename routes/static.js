@@ -7,7 +7,6 @@ const filesPath = '/home/cavenoj/doska-v2-auth/pics/';
 
 router
     .param('name', function(req, res, next, name){
-        console.log(__dirname);
         fs.stat(filesPath + name, (err, stats) => {
             if (err) {
                 console.error(`Photo ${name} was not found`);

@@ -20,6 +20,8 @@ const getAds              = require('../libs/getblobs');
 
 const categories          = require('../config/categories.json');
 
+const picturesDirectory = __dirname + "/../pics/";
+
 mongoose.Promise = promise;     
 
 const phoneRegex = /^[\+]?[(]?[0-9]{3}[)]?[-\s\.]?[0-9]{3}[-\s\.]?[0-9]{4,6}$/;
@@ -80,16 +82,18 @@ router.route('/search')
                 if(err) {
                     res.status(500).json({error: err});
                 }
-                getAds(res, blobs);
-        }).catch(console.error);
+                res.status(200).json(getAds(blobs));
+        }).catch(error =>{
+            new Error("An error ocurred");
+            console.error(error);
+        });
     });
 
 //GET all blobs
 router.get('/', function(req, res, next) {
-    console.log(req.query);
 
     //skip: req.query.page * req.query.page_size, limit: req.query.page_size
-    Blob.find({})
+    Blob.find({$or: [{category: req.query.category}, {}]})
         .limit(+req.query.page_size)
         .skip(req.query.page * req.query.page_size)
         .sort([['date', '-1']])
@@ -133,36 +137,43 @@ router.put('/', upload.single('file'), function(req, res) {
 		if(!regEx.test(req.body.number)){
 			res.status(500).send({error: "incorrect phone number"});
 			return;
-		}
-        
-        let largePhotoName = __dirname + "/../pics/" + req.file.filename;
-        let normalPhotosDir = largePhotoName.substring(0, largePhotoName.lastIndexOf('/')) + "/compressed/";
-        let thumbnailPhotoName = largePhotoName.substring(0, largePhotoName.lastIndexOf('/')) + "/downscaled/"
-            + req.file.filename;
+        }
 
-        imagemin([largePhotoName], normalPhotosDir, {
+        let largePhotoName = picturesDirectory + req.file.filename;
+        let thumbnailPhotoName = picturesDirectory + "downscaled_" + req.file.filename;
+
+        let extension = req.file.filename.split('.').pop();
+        let normalPhotoName = [picturesDirectory, 'compressed_', req.file.filename].join('');
+
+        let copyOriginalFileName = [picturesDirectory, 'original_', req.file.filename].join('');
+        fs.createReadStream(largePhotoName).pipe(fs.createWriteStream(copyOriginalFileName));
+
+        imagemin([largePhotoName], picturesDirectory, {
             plugins: [
                 imageminJpegtran(),
                 imageminPngquant({quality: '65-80'})
             ]
-        });
-
-        sharp(largePhotoName)
+        })
+        .then(file => {
+            fs.rename(file[0].path, normalPhotoName, function(error){
+                if(error) console.error(error);
+            });
+            sharp(normalPhotoName)
             .resize(300)
             .toFile(thumbnailPhotoName, function(err) {
                 console.log(err);
                 if(err) thumbnailPhotoName = "";
             });
-    
-        console.log(thumbnailPhotoName);
+        })
+        .catch(error => console.error(error));
 
         Blob.create({
             price: req.body.price,
             adName: req.body.ad_name,
             description: req.body.description,
             photo: {
-                large: largePhotoName,
-                normal: normalPhotosDir + req.file.filename,
+                large: copyOriginalFileName,
+                normal: normalPhotoName,
                 thumbnail: thumbnailPhotoName  
             },
             date: req.body.date,
@@ -170,7 +181,6 @@ router.put('/', upload.single('file'), function(req, res) {
             category: req.body.category,
             phoneNumber: req.body.number
         }, function (err, blob) {
-            console.error(blob);
             if (err) {
                 console.log("Err" + err);
                 console.log("Blob" + blob);
@@ -195,8 +205,7 @@ router.put('/', upload.single('file'), function(req, res) {
                 }
             });
         }).catch(error => {
-            //new Error("an error ocurred!");
-            console.log("Error" + error);
+            new Error("an error ocurred!");
         });
 });
 
@@ -243,9 +252,12 @@ router.get('/:id/photo', function (req, res){
             res.status(403).json({error: err});
         }
 		else {
-            res.status(200).download(blob.photoFile);
+            res.status(200).download(blob.photo.normal);
         }
-	}).catch(err => new Error(err));
+	}).catch(err => {
+        console.error(err);
+        new Error("An error ocurred!");
+    });
 });
 
 router.route('/:id')
@@ -277,7 +289,7 @@ router.route('/:id')
 
 //TODO: change put to post
 //update a blob by ID
-router.post('/:id/edit', upload.single('file'), function(req, res) {
+router.post('/:id/', upload.single('file'), function(req, res) {
     
     if(Object.getOwnPropertyNames(req.body).length === 0 || !!!req.file){
         res.status(304).send({message: "Nothing to modify"});
@@ -295,23 +307,28 @@ router.post('/:id/edit', upload.single('file'), function(req, res) {
             return;
         }
 
+        //remember blob photo large name
+        let oldFileName = blob.photo.large;
+
         let largePhotoName = null;
-        let normalPhotoDir = null;
+        let normalPhotoName = null;
         let thumbnailPhotoName = null;
+        let copyOriginalFileName = null;
 
         if(req.file) {
-            largePhotoName = __dirname + "/../pics/" + req.file.filename;
-            normalPhotoDir = largePhotoName.substring(0, largePhotoName.lastIndexOf('/')) + "/compressed/";
-            thumbnailPhotoName = largePhotoName.substring(0, largePhotoName.lastIndexOf('/')) + "/downscaled/" + req.file.filename;
+            largePhotoName = picturesDirectory + req.file.filename;
+            copyOriginalFileName = [picturesDirectory, 'original_', req.file.filename].join('');
+            thumbnailPhotoName = [picturesDirectory, 'downscaled_', req.file.filename].join('');
+            normalPhotoName = [picturesDirectory, 'compressed_', req.file.filename].join('');
         }
 
-        let normalPhotoName = normalPhotoDir + req.file.filename;
-        let oldFileName = blob.photo.large;
+        //copy original photo
+        fs.createReadStream(largePhotoName).pipe(fs.createWriteStream(copyOriginalFileName));
 
         blob.price = req.body.price || blob.price;
         blob.adName =  req.body.ad_name || blob.adName;
         blob.description = req.body.description || blob.description;
-        blob.photo.normal = normalPhotoName.startsWith(null) ? blob.photo.normal : normalPhotoName;
+        blob.photo.normal = copyOriginalFileName || blob.photo.normal;
         blob.photo.large = largePhotoName || blob.photo.large;
         blob.photo.thumbnail = thumbnailPhotoName || blob.photo.thumbnail;
         blob.date = req.body.date || Date.now();
@@ -323,24 +340,25 @@ router.post('/:id/edit', upload.single('file'), function(req, res) {
                 res.status(500).json({error: err});
                 return;
             }
-            console.log(updatedBlob.photo.large);
-            console.log(blob.photo.large);
             if(oldFileName !== updatedBlob.photo.large) {
-                imagemin([largePhotoName], normalPhotoDir, {
+                imagemin([largePhotoName], picturesDirectory, {
                     plugins: [
                         imageminJpegtran(),
                         imageminPngquant({quality: '65-80'})
                     ]
-                });
-
-                sharp(largePhotoName)
-                .resize(300)
-                .toFile(thumbnailPhotoName, function(err) {
-                    if(err) {
-                        console.error(err);
-                        thumbnailPhotoName = "";
-                    }
-                });
+                })
+                .then(file => {
+                    fs.rename(file[0].path, normalPhotoName, function(error){
+                        if(error) console.error(error);
+                    });
+                    sharp(normalPhotoName)
+                    .resize(300)
+                    .toFile(thumbnailPhotoName, function(err) {
+                        console.log(err);
+                        if(err) thumbnailPhotoName = "";
+                    });
+                })
+                .catch(error => console.error(error));
             }
             res.format({
                 html: function(){
@@ -363,13 +381,13 @@ router.post('/:id/edit', upload.single('file'), function(req, res) {
 
 
 //DELETE a Blob by ID
-router.delete('/:id/delete', function (req, res){
+router.delete('/:id/', function (req, res){
     //find blob by ID
     Blob.findById(req.id, function (err, blob) {
         if (err) {
             return new Error("An error ocurred!");
         }
-        else if(req.user.userId !== blob.userId) {
+        else if(req.user.userId != blob.userId) {
             res.status(403).json({error: "Incorrect token"});
             return;
         } 
