@@ -60,30 +60,18 @@ const categoryValidator = (category) => categories.includes(category);
 router.route('/search')
     .get(function(req, res){
         
-        let query = "";
+        console.log(`request query ${JSON.stringify(req.query.q)}`);
         
-        for(const key in req.query){
-            if(key == "num") break;
-            query += req.query[key];
-        }
-        
-        console.log(`request query ${JSON.stringify(query)}`);
-        
-        let num = parseInt(req.query.num);
-        if(!!req.query.num === false) {
-            num = 5;
-        }
-        console.log(`number of posts ${num}`);
-        
-        Blob.find({$text: {$search: query}})
-            .limit(num)
+        Blob.find({$text: {$search: req.query.q}})
+            .limit(+req.query.page_size)
+            .skip(req.query.page * req.query.page_size)
             .sort([['date', '-1']])
             .exec(function (err, blobs){
                 if(err) {
                     res.status(500).json({error: err});
                 }
                 res.status(200).json(getAds(blobs));
-        }).catch(error =>{
+        }).catch(error => {
             new Error("An error ocurred");
             console.error(error);
         });
@@ -278,13 +266,18 @@ router.route('/:id')
                         });
                     },
                     json: function(){
-                        blob.photoFile = "/static/photos/" + blob.photoFile.split("/").pop();
+                        blob.photo.normal = "/static/photos/" + blob.photo.normal.split("/").pop();
+                        blob.photo.large = "/static/photos/" + blob.photo.large.split("/").pop();
+                        blob.photo.thumbnail = "/static/photos/" + blob.photo.thumbnail.split("/").pop();
                         res.status(200).json(blob);
                     }
                 });
      	    }
-        }).catch(error => new Error(error));
-});
+        }).catch(error => {
+            new Error("An error ocurred!");
+            console.error(error);
+        });
+    });
 
 
 //TODO: change put to post
