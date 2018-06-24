@@ -7,7 +7,6 @@
 let app = require('../app');
 let debug = require('debug')('nodewebapp:server');
 let http = require('http');
-let fs = require('fs');
 
 const downscaledPicsPath = __dirname + '/../pics/downscaled';
 
@@ -85,11 +84,6 @@ function onError(error) {
  */
 
 function onListening() {
-  fs.stat(downscaledPicsPath, function(err, stats){
-    if(err) fs.mkdir(downscaledPicsPath, function(err){
-      if(err) return;
-    });
-  });
   let addr = server.address();
   let bind = typeof addr === 'string'
     ? 'pipe ' + addr
