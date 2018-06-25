@@ -2,7 +2,14 @@
 
 let mongoose = require('mongoose'); 
 let ObjectId = mongoose.Schema.ObjectId;  
-let categories = require('../config/categories.json'); 
+
+let categoriesWithThumbnails = require('../config/categories.json')['categories'];
+let categories = [];
+
+for(const key in categoriesWithThumbnails){
+	categories.push(categoriesWithThumbnails[key]['name']);
+}
+
 console.log(categories);
 
 let blobSchema = new mongoose.Schema({ 
