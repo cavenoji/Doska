@@ -108,7 +108,6 @@ router.get('/', function(req, res, next) {
     }).catch(error => new Error(error));
 });
 
-//GET Blobs by category
 router.use(validateJwt({secret: "secret"}));
 
 //TODO change post to put
@@ -123,7 +122,7 @@ router.put('/', upload.single('file'), function(req, res) {
         
         let regEx = new RegExp(phoneRegex);
 		if(!regEx.test(req.body.number)){
-			res.status(500).send({error: "incorrect phone number"});
+			res.status(400).send({error: "incorrect phone number"});
 			return;
         }
 
